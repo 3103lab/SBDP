@@ -68,3 +68,13 @@ SBDP の各メッセージは、以下の構造を持ちます。
 - データ長は unsigned int（big endian）
 
 ---
+
+## ライセンス
+
+このプロジェクトは **SimpleBinaryDictionaryProtocol License v1.0** に基づいています。  
+
+---
+
+## 関連リポジトリ
+
+- Python実装：[PySBDP (C++)](https://github.com/3103lab/PySBDP)
