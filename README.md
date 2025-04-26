@@ -77,4 +77,4 @@ SBDP の各メッセージは、以下の構造を持ちます。
 
 ## 関連リポジトリ
 
-- Python実装：[PySBDP (C++)](https://github.com/3103lab/PySBDP)
+- Python実装：[PySBDP (Python)](https://github.com/3103lab/PySBDP)
