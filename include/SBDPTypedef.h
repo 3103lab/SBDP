@@ -13,6 +13,7 @@
 #include <variant>
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 namespace sbdp {
 

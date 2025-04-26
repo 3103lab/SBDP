@@ -8,6 +8,13 @@
  *****************************************************************************/
 #pragma once
 
+#include "SBDP.h"
+#include <vector>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #define _WINSOCK_DEPRECATED_NO_WARNINGS
@@ -25,23 +32,7 @@
     #define SOCKET_ERROR (-1)
 #endif
 
-#include <vector>
-#include <cstdint>
-#include <cstring>
-#include <stdexcept>
-#include <string>
-
 namespace sbdp {
-
-    // エンディアン変換関数（Windows/Linux共通）
-    inline uint64_t htonll(uint64_t value) {
-        return (((uint64_t)htonl(static_cast<uint32_t>(value & 0xFFFFFFFFULL))) << 32)
-               | htonl(static_cast<uint32_t>(value >> 32));
-    }
-    inline uint64_t ntohll(uint64_t value) {
-        return (((uint64_t)ntohl(static_cast<uint32_t>(value & 0xFFFFFFFFULL))) << 32)
-               | ntohl(static_cast<uint32_t>(value >> 32));
-    }
 
     /******************************************************************************
      * @brief   ソケット初期化
@@ -332,4 +323,36 @@ namespace sbdp {
         return std::string(host);
     }
 
+    /******************************************************************************
+     * @brief   SBDP プロトコルメッセージ送信
+     * @arg     cSocket (in) 送信に使用するソケット
+     * @arg     msg     (in) 送信するメッセージ
+     * @return  送信結果 true:正常 false:異常
+     * @note
+     *****************************************************************************/
+    inline bool send_message(Socket& cSocket, const Message& msg) {
+        std::vector<uint8_t> data = encode_message(msg);
+        return cSocket.send_all(data.data(), data.size());
+    }
+
+    /******************************************************************************
+     * @brief   SBDP プロトコルメッセージ受信
+     * @arg     cSocket     (in) 受信に使用するソケット
+     * @arg     unTimeoutMs (in) タイムアウト(ミリ秒)
+     * @return  受信メッセージ
+     * @note
+     *****************************************************************************/
+    inline Message recv_message(Socket& cSocket, uint64_t unTimeoutMs = 0) {
+        uint8_t header[4];
+        if (!cSocket.recv_all(header, 4, unTimeoutMs))
+            throw std::runtime_error("Header reception failed");
+        uint32_t net_payload_len;
+        std::memcpy(&net_payload_len, header, 4);
+        uint32_t payload_len = ntohl(net_payload_len);
+        std::vector<uint8_t> buffer(4 + payload_len);
+        std::memcpy(buffer.data(), header, 4);
+        if (!cSocket.recv_all(buffer.data() + 4, payload_len , unTimeoutMs))
+            throw std::runtime_error("Payload reception failed");
+        return decode_message(buffer);
+    }
 } // namespace sbdp
