@@ -1,6 +1,6 @@
 # SimpleBinaryDictionaryProtocol (SBDP)
 
-SimpleBinaryDictionaryProtocol (SBDP) は、軽量で効率的なバイナリ形式のキー・バリュープロトコルです。組込みシステムや高性能ネットワーク通信に適した構造を提供します。
+SimpleBinaryDictionaryProtocol (SBDP) は、シンプルなバイナリ形式のキー・バリュープロトコルです。
 
 ## プロトコル概要
 
