@@ -66,12 +66,12 @@ namespace sbdp {
                 uint64_t net_v = htonll(v);
                 append_bytes(payload, net_v);
             }
-            else if (std::holds_alternative<float>(value)) {
-                payload.push_back(TYPE_FLOAT);
-                float v = std::get<float>(value);
-                uint32_t net_v;
+            else if (std::holds_alternative<float64_t>(value)) {
+                payload.push_back(TYPE_FLOAT64);
+                float64_t v = std::get<float64_t>(value);
+                uint64_t  net_v;
                 std::memcpy(&net_v, &v, sizeof(v));
-                net_v = htonl(net_v);
+                net_v = htonll(net_v);
                 append_bytes(payload, net_v);
             }
             else if (std::holds_alternative<std::string>(value)) {
@@ -148,14 +148,14 @@ namespace sbdp {
                 uint64_t v = ntohll(net_v);
                 msg[key] = v;
             }
-            else if (type_code == TYPE_FLOAT) {
-                if (offset + 4 > message.size())
-                    throw std::runtime_error("float read error");
-                uint32_t net_v;
-                std::memcpy(&net_v, message.data() + offset, 4);
-                offset += 4;
-                net_v = ntohl(net_v);
-                float v;
+            else if (type_code == TYPE_FLOAT64) {
+                if (offset + 8 > message.size())
+                    throw std::runtime_error("float64_t read error");
+                uint64_t  net_v;
+                std::memcpy(&net_v, message.data() + offset, 8);
+                offset += 8;
+                net_v = ntohll(net_v);
+                float64_t v;
                 std::memcpy(&v, &net_v, sizeof(v));
                 msg[key] = v;
             }
