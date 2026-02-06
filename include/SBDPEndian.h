@@ -11,6 +11,16 @@
 
 namespace sbdp {
 
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+inline constexpr bool k_bHostIsLittleEndian = false;
+#elif defined(_WIN32)
+inline constexpr bool k_bHostIsLittleEndian = true;
+#elif defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+inline constexpr bool k_bHostIsLittleEndian = true;
+#else
+#error "Cannot determine host byte order."
+#endif
+
 /******************************************************************************
  * @brief   16bit値をホストバイトオーダーからネットワークバイトオーダーへ変換
  * @arg     x (in) 変換する16bit値
@@ -18,7 +28,10 @@ namespace sbdp {
  * @note    
  *****************************************************************************/
 inline uint16_t htons(uint16_t x) {
-    return (x << 8) | (x >> 8);
+    if constexpr (!k_bHostIsLittleEndian) {
+        return x;
+    }
+    return static_cast<uint16_t>((x << 8) | (x >> 8));
 }
 
 /******************************************************************************
@@ -38,6 +51,9 @@ inline uint16_t ntohs(uint16_t x) {
  * @note    
  *****************************************************************************/
 inline uint32_t htonl(uint32_t x) {
+    if constexpr (!k_bHostIsLittleEndian) {
+        return x;
+    }
     return ((x & 0x000000FFUL) << 24) |
            ((x & 0x0000FF00UL) << 8)  |
            ((x & 0x00FF0000UL) >> 8)  |
@@ -61,6 +77,9 @@ inline uint32_t ntohl(uint32_t x) {
  * @note    
  *****************************************************************************/
 inline uint64_t htonll(uint64_t x) {
+    if constexpr (!k_bHostIsLittleEndian) {
+        return x;
+    }
     return ((x & 0x00000000000000FFULL) << 56) |
            ((x & 0x000000000000FF00ULL) << 40) |
            ((x & 0x0000000000FF0000ULL) << 24) |
