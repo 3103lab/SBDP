@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - "include/**"
+      - ".github/workflows/**"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "include/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SBDP (this repo)
+        uses: actions/checkout@v4
+
+      - name: Checkout SBDP-Test
+        uses: actions/checkout@v4
+        with:
+          repository: 3103lab/SBDP-Test
+          path: SBDP-Test
+
+      - name: Replace submodule SBDP with PR workspace
+        run: |
+          rm -rf SBDP-Test/src/SBDP/include
+          mkdir -p SBDP-Test/src/SBDP/include
+          rsync -a --delete include/ SBDP-Test/src/SBDP/include
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+      - name: Build tests
+        working-directory: SBDP-Test/src
+        run: |
+          make
+
+      - name: Run tests
+        working-directory: SBDP-Test
+        run: |
+          ./bin/SBDP-Test
