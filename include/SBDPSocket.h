@@ -67,7 +67,7 @@ namespace sbdp {
     class Socket {
     public:
         // コンストラクタ・デストラクタ
-        Socket() : m_hSocket(INVALID_SOCKET) { }
+        Socket() : m_hSocket(INVALID_SOCKET), m_bShutdown(false){ }
         ~Socket() { Close(); }
 
         Socket(const Socket&) = delete;
@@ -139,6 +139,9 @@ namespace sbdp {
                                                reinterpret_cast<sockaddr*>(&stClientAddress),
                                                &snAddressLength);
             if (cClientSocket.m_hSocket == INVALID_SOCKET) {
+                if (m_bShutdown.load()) {
+                    throw std::system_error(static_cast<int>(std::errc::operation_canceled), std::generic_category(), "socket shutdown");
+                }
                 throw std::runtime_error("Accept failed");
             }
             return cClientSocket;
@@ -212,7 +215,7 @@ namespace sbdp {
          * @note    
          *****************************************************************************/
         bool SendAll(const uint8_t* pData, size_t unLength) {
-            return bSendAll(m_hSocket, pData, unLength);
+            return bSendAll(pData, unLength);
         }
 
         /******************************************************************************
@@ -225,9 +228,9 @@ namespace sbdp {
          *****************************************************************************/
         bool RecvAll(uint8_t* pBuffer, size_t unLength, uint64_t unTimeoutMs) {
             if (unTimeoutMs == 0) {
-                return bRecvAll(m_hSocket, pBuffer, unLength);
+                return bRecvAll(pBuffer, unLength);
             }
-            return bRecvAllWithTimeout(m_hSocket, pBuffer, unLength, unTimeoutMs);
+            return bRecvAllWithTimeout(pBuffer, unLength, unTimeoutMs);
         }
 
         /******************************************************************************
@@ -280,6 +283,23 @@ namespace sbdp {
             }
         }
 
+        /******************************************************************************
+         * @brief   ソケットのシャットダウン
+         * @arg     なし
+         * @return  なし
+         * @note
+         *****************************************************************************/
+        void Shutdown() {
+            if (m_hSocket != INVALID_SOCKET) {
+#ifdef _WIN32
+                ::shutdown(m_hSocket, SD_BOTH);
+#else
+                ::shutdown(m_hSocket, SHUT_RDWR);
+#endif
+				m_bShutdown.store(true);
+            }
+        }
+
     private:
         /******************************************************************************
          * @brief   ソケットエラーを例外として送出
@@ -297,16 +317,19 @@ namespace sbdp {
 
         /******************************************************************************
          * @brief   バッファ内の全データを送信（ブロッキング）
-         * @arg     hSocket  (in) 送信に使用するソケット
          * @arg     pData    (in) 送信するデータ
          * @arg     unLength (in) 送信するデータ長
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        static bool bSendAll(SOCKET hSocket, const uint8_t* pData, size_t unLength) {
+        bool bSendAll(const uint8_t* pData, size_t unLength) {
             size_t unTotalSent = 0;
             while (unTotalSent < unLength) {
-                int snSent = send(hSocket, reinterpret_cast<const char*>(pData + unTotalSent),
+                if (m_bShutdown.load()) {
+                    throw std::system_error(static_cast<int>(std::errc::operation_canceled), std::generic_category(), "socket shutdown");
+                }
+
+                int snSent = send(m_hSocket, reinterpret_cast<const char*>(pData + unTotalSent),
                                   static_cast<int>(unLength - unTotalSent), 0);
                 if (snSent == SOCKET_ERROR || snSent <= 0) {
                     vThrowSocketError("send");
@@ -324,10 +347,14 @@ namespace sbdp {
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        static bool bRecvAll(SOCKET hSocket, uint8_t* pBuffer, size_t unLength) {
+        bool bRecvAll(uint8_t* pBuffer, size_t unLength) {
             size_t unTotalReceived = 0;
             while (unTotalReceived < unLength) {
-                int snReceived = recv(hSocket, reinterpret_cast<char*>(pBuffer + unTotalReceived),
+                if (m_bShutdown.load()) {
+                    throw std::system_error(static_cast<int>(std::errc::operation_canceled), std::generic_category(), "socket shutdown");
+                }
+
+                int snReceived = recv(m_hSocket, reinterpret_cast<char*>(pBuffer + unTotalReceived),
                                       static_cast<int>(unLength - unTotalReceived), 0);
                 if (snReceived <= 0) {
                     vThrowSocketError("recv");
@@ -339,37 +366,35 @@ namespace sbdp {
 
         /******************************************************************************
          * @brief   タイムアウト付き指定バイト数を受信 （ミリ秒単位）
-         * @arg     hSocket     (in)  受信に使用するソケット
          * @arg     pBuffer     (out) 受信するデータ格納バッファ
          * @arg     unLength    (in)  受信するデータ長
          * @arg     unTimeoutMs (in)  タイムアウト(ミリ秒)
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        static bool bRecvAllWithTimeout(SOCKET hSocket, uint8_t* pBuffer, size_t unLength, uint64_t unTimeoutMs) {
+        bool bRecvAllWithTimeout(uint8_t* pBuffer, size_t unLength, uint64_t unTimeoutMs) {
             size_t unTotalReceived = 0;
             while (unTotalReceived < unLength) {
                 fd_set stReadFds;
                 FD_ZERO(&stReadFds);
-                FD_SET(hSocket, &stReadFds);
+                FD_SET(m_hSocket, &stReadFds);
 
                 struct timeval stTimeout {};
-                stTimeout.tv_sec = static_cast<long>(unTimeoutMs / 1000);
+                stTimeout.tv_sec = static_cast<long>(  unTimeoutMs / 1000);
                 stTimeout.tv_usec = static_cast<long>((unTimeoutMs % 1000) * 1000);
 
-                int snSelectResult = select(static_cast<int>(hSocket) + 1,
+                int snSelectResult = select(static_cast<int>(m_hSocket) + 1,
                                             &stReadFds, nullptr, nullptr, &stTimeout);
                 if (snSelectResult < 0) {
                     vThrowSocketError("select");
                 }
                 if (snSelectResult == 0) {
-                    throw std::system_error(
-                        static_cast<int>(std::errc::timed_out),
-                        std::generic_category(),
-                        "select timeout");
+                    throw std::system_error( static_cast<int>(std::errc::timed_out), std::generic_category(), "select timeout");
                 }
-
-                int snReceived = recv(hSocket, reinterpret_cast<char*>(pBuffer + unTotalReceived),
+                if(m_bShutdown.load()) {
+                    throw std::system_error( static_cast<int>(std::errc::operation_canceled), std::generic_category(), "socket shutdown");
+				}
+                int snReceived = recv(m_hSocket, reinterpret_cast<char*>(pBuffer + unTotalReceived),
                                       static_cast<int>(unLength - unTotalReceived), 0);
                 if (snReceived <= 0) {
                     vThrowSocketError("recv");
@@ -380,7 +405,8 @@ namespace sbdp {
         }
         
     private:
-        SOCKET m_hSocket;
+        SOCKET           m_hSocket;
+        std::atomic_bool m_bShutdown;
     };
 
     /******************************************************************************
