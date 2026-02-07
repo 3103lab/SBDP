@@ -8,12 +8,13 @@
  *****************************************************************************/
 #pragma once
 
-#include "SBDP.h"
 #include <vector>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <cerrno>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -31,6 +32,7 @@
     #define INVALID_SOCKET (-1)
     #define SOCKET_ERROR (-1)
 #endif
+#include "SBDP.h"
 
 namespace sbdp {
 
@@ -38,12 +40,12 @@ namespace sbdp {
      * @brief   ソケット初期化
      * @arg     なし
      * @return  結果 true:正常 false:異常
-     * @note    本処理を実行後、終了時にはcleanup_socketsを実行してください
+     * @note    本処理を実行後、終了時にはCleanupSocketsを実行してください
      *****************************************************************************/
-    inline bool init_sockets() {
+    inline bool InitSockets() {
     #ifdef _WIN32
-        WSADATA wsaData;
-        return (WSAStartup(MAKEWORD(2,2), &wsaData) == 0);
+        WSADATA stWsaData;
+        return (WSAStartup(MAKEWORD(2,2), &stWsaData) == 0);
     #else
         return true;
     #endif
@@ -55,104 +57,30 @@ namespace sbdp {
      * @return  なし
      * @note
      *****************************************************************************/
-    inline void cleanup_sockets() {
+    inline void CleanupSockets() {
     #ifdef _WIN32
         WSACleanup();
     #endif
-    }
-
-    /******************************************************************************
-     * @brief   バッファ内の全データを送信（ブロッキング）
-     * @arg     cSocket (in) 送信に使用するソケット
-     * @arg     data    (in) 送信するデータ
-     * @arg     len     (in) 送信するデータ長
-     * @return  結果 true:正常 false:異常
-     * @note    
-     *****************************************************************************/
-    inline bool send_all(SOCKET sock, const uint8_t* data, size_t len) {
-        size_t total_sent = 0;
-        while (total_sent < len) {
-            int sent = send(sock, reinterpret_cast<const char*>(data + total_sent),
-                            static_cast<int>(len - total_sent), 0);
-            if (sent == SOCKET_ERROR || sent <= 0)
-                return false;
-            total_sent += sent;
-        }
-        return true;
-    }
-
-    /******************************************************************************
-     * @brief   指定バイト数を受信（ブロッキング）
-     * @arg     cSocket (in)  受信に使用するソケット
-     * @arg     data    (out) 受信するデータ格納バッファ
-     * @arg     len     (in)  受信するデータ長
-     * @return  結果 true:正常 false:異常
-     * @note    
-     *****************************************************************************/
-    inline bool recv_all(SOCKET sock, uint8_t* buffer, size_t len) {
-        size_t total_recv = 0;
-        while (total_recv < len) {
-            int recvd = recv(sock, reinterpret_cast<char*>(buffer + total_recv),
-                             static_cast<int>(len - total_recv), 0);
-            if (recvd <= 0)
-                return false;
-            total_recv += recvd;
-        }
-        return true;
-    }
-
-    /******************************************************************************
-     * @brief   タイムアウト付き指定バイト数を受信 （ミリ秒単位）
-     * @arg     cSocket     (in)  受信に使用するソケット
-     * @arg     data        (out) 受信するデータ格納バッファ
-     * @arg     len         (in)  受信するデータ長
-     * @arg     unTimeoutMs (in)  タイムアウト(ミリ秒)
-     * @return  結果 true:正常 false:異常
-     * @note    
-     *****************************************************************************/
-    inline bool recv_all_with_timeout(SOCKET sock, uint8_t* buffer, size_t len, uint64_t unTimeoutMs) {
-        size_t total_recv = 0;
-        while (total_recv < len) {
-            fd_set read_fds;
-            FD_ZERO(&read_fds);
-            FD_SET(sock, &read_fds);
-
-            struct timeval tv {};
-            tv.tv_sec = static_cast<long>(unTimeoutMs / 1000);
-            tv.tv_usec = (unTimeoutMs % 1000) * 1000;
-
-            int ret = select( static_cast<int>(sock) + 1, &read_fds, nullptr, nullptr, &tv);
-            if (ret <= 0) {
-                return false; // timeout or error
-            }
-
-            int recvd = recv(sock, reinterpret_cast<char*>(buffer + total_recv),
-                static_cast<int>(len - total_recv), 0);
-            if (recvd <= 0)
-                return false;
-            total_recv += recvd;
-        }
-        return true;
     }
 
     // Socket クラス（コピー禁止、ムーブ可能）
     class Socket {
     public:
         // コンストラクタ・デストラクタ
-        Socket() : sock(INVALID_SOCKET) { }
-        ~Socket() { close(); }
+        Socket() : m_hSocket(INVALID_SOCKET) { }
+        ~Socket() { Close(); }
 
         Socket(const Socket&) = delete;
         Socket& operator=(const Socket&) = delete;
 
-        Socket(Socket&& other) noexcept : sock(other.sock) {
-            other.sock = INVALID_SOCKET;
+        Socket(Socket&& other) noexcept : m_hSocket(other.m_hSocket) {
+            other.m_hSocket = INVALID_SOCKET;
         }
         Socket& operator=(Socket&& other) noexcept {
             if (this != &other) {
-                close();
-                sock = other.sock;
-                other.sock = INVALID_SOCKET;
+                Close();
+                m_hSocket = other.m_hSocket;
+                other.m_hSocket = INVALID_SOCKET;
             }
             return *this;
         }
@@ -163,9 +91,9 @@ namespace sbdp {
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        bool create() {
-            sock = ::socket(AF_INET, SOCK_STREAM, 0);
-            return (sock != INVALID_SOCKET);
+        bool Create() {
+            m_hSocket = ::socket(AF_INET, SOCK_STREAM, 0);
+            return (m_hSocket != INVALID_SOCKET);
         }
 
         /******************************************************************************
@@ -174,13 +102,13 @@ namespace sbdp {
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        bool bind(unsigned short port) {
-            sockaddr_in addr;
-            std::memset(&addr, 0, sizeof(addr));
-            addr.sin_family = AF_INET;
-            addr.sin_addr.s_addr = INADDR_ANY;
-            addr.sin_port = htons(port);
-            return (::bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != SOCKET_ERROR);
+        bool Bind(unsigned short unPort) {
+            sockaddr_in stAddress;
+            std::memset(&stAddress, 0, sizeof(stAddress));
+            stAddress.sin_family = AF_INET;
+            stAddress.sin_addr.s_addr = INADDR_ANY;
+            stAddress.sin_port = htons(unPort);
+            return (::bind(m_hSocket, reinterpret_cast<sockaddr*>(&stAddress), sizeof(stAddress)) != SOCKET_ERROR);
         }
 
         /******************************************************************************
@@ -189,8 +117,8 @@ namespace sbdp {
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        bool listen(int backlog = SOMAXCONN) {
-            return (::listen(sock, backlog) != SOCKET_ERROR);
+        bool Listen(int snBacklog = SOMAXCONN) {
+            return (::listen(m_hSocket, snBacklog) != SOCKET_ERROR);
         }
 
         /******************************************************************************
@@ -199,18 +127,21 @@ namespace sbdp {
          * @return  クライアントソケット
          * @note    
          *****************************************************************************/
-        Socket accept() {
-            Socket newSock;
-            sockaddr_in clientAddr;
+        Socket Accept() {
+            Socket cClientSocket;
+            sockaddr_in stClientAddress;
         #ifdef _WIN32
-            int addrLen = sizeof(clientAddr);
+            int snAddressLength = sizeof(stClientAddress);
         #else
-            socklen_t addrLen = sizeof(clientAddr);
+            socklen_t snAddressLength = sizeof(stClientAddress);
         #endif
-            newSock.sock = ::accept(sock, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
-            if (newSock.sock == INVALID_SOCKET)
+            cClientSocket.m_hSocket = ::accept(m_hSocket,
+                                               reinterpret_cast<sockaddr*>(&stClientAddress),
+                                               &snAddressLength);
+            if (cClientSocket.m_hSocket == INVALID_SOCKET) {
                 throw std::runtime_error("Accept failed");
-            return newSock;
+            }
+            return cClientSocket;
         }
 
         /******************************************************************************
@@ -220,37 +151,58 @@ namespace sbdp {
          * @return  クライアントソケット
          * @note    
          *****************************************************************************/
-        bool connect(const std::string& host, unsigned short port) {
-            addrinfo hints{};
-            hints.ai_family = AF_INET;        // IPv4
-            hints.ai_socktype = SOCK_STREAM;  // TCP
+        bool Connect(const std::string& strHost, unsigned short unPort) {
+            addrinfo stHints {};
+            stHints.ai_family = AF_INET;        // IPv4
+            stHints.ai_socktype = SOCK_STREAM;  // TCP
 
-            addrinfo* result = nullptr;
-            std::string portStr = std::to_string(port);
+            addrinfo* pstResult = nullptr;
+            std::string strPort = std::to_string(unPort);
 
-            if (getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result) != 0) {
+            if (getaddrinfo(strHost.c_str(), strPort.c_str(), &stHints, &pstResult) != 0) {
                 return false;
             }
 
-            bool connected = false;
-            for (addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
-                if (::connect(sock, rp->ai_addr, static_cast<int>(rp->ai_addrlen)) != SOCKET_ERROR) {
-                    connected = true;
+            bool bConnected = false;
+            for (addrinfo* pstCurrent = pstResult; pstCurrent != nullptr; pstCurrent = pstCurrent->ai_next) {
+                if (::connect(m_hSocket, pstCurrent->ai_addr,
+                              static_cast<int>(pstCurrent->ai_addrlen)) != SOCKET_ERROR) {
+                    bConnected = true;
                     break;
                 }
             }
 
-            freeaddrinfo(result);
-            return connected;
+            freeaddrinfo(pstResult);
+            return bConnected;
         }
 
         /******************************************************************************
-         * @brief   内部の SOCKET ハンドルの取得
+         * @brief   接続先アドレス文字列の取得
          * @arg     なし
-         * @return  SOCKET ハンドル
+         * @return  接続先アドレス文字列
          * @note    
          *****************************************************************************/
-        SOCKET get_handle() const { return sock; }
+        std::string GetPeerAddress() const {
+            sockaddr_in stAddress;
+        #ifdef _WIN32
+            int snAddressLength = sizeof(stAddress);
+        #else
+            socklen_t snAddressLength = sizeof(stAddress);
+        #endif
+            if (getpeername(m_hSocket,
+                            reinterpret_cast<sockaddr*>(&stAddress),
+                            &snAddressLength) != 0) {
+                return "[error retrieving address]";
+            }
+
+            char szHost[NI_MAXHOST];
+            // getnameinfo() によりIPアドレスを数値文字列として取得
+            if (getnameinfo(reinterpret_cast<sockaddr*>(&stAddress), snAddressLength,
+                            szHost, sizeof(szHost), nullptr, 0, NI_NUMERICHOST) != 0) {
+                return "[unknown]";
+            }
+            return std::string(szHost);
+        }
 
         /******************************************************************************
          * @brief   バッファ全体の送信
@@ -259,8 +211,8 @@ namespace sbdp {
          * @return  結果 true:正常 false:異常
          * @note    
          *****************************************************************************/
-        bool send_all(const uint8_t* data, size_t len) {
-            return sbdp::send_all(sock, data, len);
+        bool SendAll(const uint8_t* pData, size_t unLength) {
+            return bSendAll(m_hSocket, pData, unLength);
         }
 
         /******************************************************************************
@@ -271,11 +223,44 @@ namespace sbdp {
          * @return  結果 true:正常 false:異常
          * @note    unTimeoutMsを0にした場合、タイムアウトなしになります
          *****************************************************************************/
-        bool recv_all(uint8_t* buffer, size_t len, uint64_t unTimeoutMs) {
+        bool RecvAll(uint8_t* pBuffer, size_t unLength, uint64_t unTimeoutMs) {
             if (unTimeoutMs == 0) {
-                return sbdp::recv_all(sock, buffer, len);
+                return bRecvAll(m_hSocket, pBuffer, unLength);
             }
-            return sbdp::recv_all_with_timeout(sock, buffer, len, unTimeoutMs);
+            return bRecvAllWithTimeout(m_hSocket, pBuffer, unLength, unTimeoutMs);
+        }
+
+        /******************************************************************************
+         * @brief   SBDP プロトコルメッセージ送信
+         * @arg     msg     (in) 送信するメッセージ
+         * @return  送信結果 true:正常 false:異常
+         * @note    
+         *****************************************************************************/
+        bool SendMessage(const Message& msgData) {
+            std::vector<uint8_t> vecData = EncodeMessage(msgData);
+            return SendAll(vecData.data(), vecData.size());
+        }
+
+        /******************************************************************************
+         * @brief   SBDP プロトコルメッセージ受信
+         * @arg     unTimeoutMs (in) タイムアウト(ミリ秒)
+         * @return  受信メッセージ
+         * @note    
+         *****************************************************************************/
+        Message RecvMessage(uint64_t unTimeoutMs = 0) {
+            uint8_t unHeader[k_unHeaderSize];
+            if (!RecvAll(unHeader, k_unHeaderSize, unTimeoutMs)) {
+                throw std::runtime_error("Header reception failed");
+            }
+            uint32_t unNetPayloadLength;
+            std::memcpy(&unNetPayloadLength, unHeader, k_unHeaderSize);
+            uint32_t unPayloadLength = ntohl(unNetPayloadLength);
+            std::vector<uint8_t> vecBuffer(k_unHeaderSize + unPayloadLength);
+            std::memcpy(vecBuffer.data(), unHeader, k_unHeaderSize);
+            if (!RecvAll(vecBuffer.data() + k_unHeaderSize, unPayloadLength, unTimeoutMs)) {
+                throw std::runtime_error("Payload reception failed");
+            }
+            return DecodeMessage(vecBuffer);
         }
 
         /******************************************************************************
@@ -284,19 +269,118 @@ namespace sbdp {
          * @return  なし
          * @note    
          *****************************************************************************/
-        void close() {
-            if (sock != INVALID_SOCKET) {
+        void Close() {
+            if (m_hSocket != INVALID_SOCKET) {
             #ifdef _WIN32
-                ::closesocket(sock);
+                ::closesocket(m_hSocket);
             #else
-                ::close(sock);
+                ::close(m_hSocket);
             #endif
-                sock = INVALID_SOCKET;
+                m_hSocket = INVALID_SOCKET;
             }
         }
 
     private:
-        SOCKET sock;
+        /******************************************************************************
+         * @brief   ソケットエラーを例外として送出
+         * @arg     pszApiName (in) API名
+         * @return  なし
+         * @note    
+         *****************************************************************************/
+        static void vThrowSocketError(const char* pszApiName) {
+#ifdef _WIN32
+            throw std::system_error(WSAGetLastError(), std::system_category(), pszApiName);
+#else
+            throw std::system_error(errno, std::system_category(), pszApiName);
+#endif
+        }
+
+        /******************************************************************************
+         * @brief   バッファ内の全データを送信（ブロッキング）
+         * @arg     hSocket  (in) 送信に使用するソケット
+         * @arg     pData    (in) 送信するデータ
+         * @arg     unLength (in) 送信するデータ長
+         * @return  結果 true:正常 false:異常
+         * @note    
+         *****************************************************************************/
+        static bool bSendAll(SOCKET hSocket, const uint8_t* pData, size_t unLength) {
+            size_t unTotalSent = 0;
+            while (unTotalSent < unLength) {
+                int snSent = send(hSocket, reinterpret_cast<const char*>(pData + unTotalSent),
+                                  static_cast<int>(unLength - unTotalSent), 0);
+                if (snSent == SOCKET_ERROR || snSent <= 0) {
+                    vThrowSocketError("send");
+                }
+                unTotalSent += static_cast<size_t>(snSent);
+            }
+            return true;
+        }
+
+        /******************************************************************************
+         * @brief   指定バイト数を受信（ブロッキング）
+         * @arg     hSocket  (in)  受信に使用するソケット
+         * @arg     pBuffer  (out) 受信するデータ格納バッファ
+         * @arg     unLength (in)  受信するデータ長
+         * @return  結果 true:正常 false:異常
+         * @note    
+         *****************************************************************************/
+        static bool bRecvAll(SOCKET hSocket, uint8_t* pBuffer, size_t unLength) {
+            size_t unTotalReceived = 0;
+            while (unTotalReceived < unLength) {
+                int snReceived = recv(hSocket, reinterpret_cast<char*>(pBuffer + unTotalReceived),
+                                      static_cast<int>(unLength - unTotalReceived), 0);
+                if (snReceived <= 0) {
+                    vThrowSocketError("recv");
+                }
+                unTotalReceived += static_cast<size_t>(snReceived);
+            }
+            return true;
+        }
+
+        /******************************************************************************
+         * @brief   タイムアウト付き指定バイト数を受信 （ミリ秒単位）
+         * @arg     hSocket     (in)  受信に使用するソケット
+         * @arg     pBuffer     (out) 受信するデータ格納バッファ
+         * @arg     unLength    (in)  受信するデータ長
+         * @arg     unTimeoutMs (in)  タイムアウト(ミリ秒)
+         * @return  結果 true:正常 false:異常
+         * @note    
+         *****************************************************************************/
+        static bool bRecvAllWithTimeout(SOCKET hSocket, uint8_t* pBuffer, size_t unLength, uint64_t unTimeoutMs) {
+            size_t unTotalReceived = 0;
+            while (unTotalReceived < unLength) {
+                fd_set stReadFds;
+                FD_ZERO(&stReadFds);
+                FD_SET(hSocket, &stReadFds);
+
+                struct timeval stTimeout {};
+                stTimeout.tv_sec = static_cast<long>(unTimeoutMs / 1000);
+                stTimeout.tv_usec = static_cast<long>((unTimeoutMs % 1000) * 1000);
+
+                int snSelectResult = select(static_cast<int>(hSocket) + 1,
+                                            &stReadFds, nullptr, nullptr, &stTimeout);
+                if (snSelectResult < 0) {
+                    vThrowSocketError("select");
+                }
+                if (snSelectResult == 0) {
+                    throw std::system_error(
+                        static_cast<int>(std::errc::timed_out),
+                        std::generic_category(),
+                        "select timeout");
+                }
+
+                int snReceived = recv(hSocket, reinterpret_cast<char*>(pBuffer + unTotalReceived),
+                                      static_cast<int>(unLength - unTotalReceived), 0);
+                if (snReceived <= 0) {
+                    vThrowSocketError("recv");
+                }
+                unTotalReceived += static_cast<size_t>(snReceived);
+            }
+            return true;
+        }
+        
+    private:
+        SOCKET m_hSocket;
     };
 
     /******************************************************************************
@@ -305,22 +389,8 @@ namespace sbdp {
      * @return  接続先アドレス文字列
      * @note    
      *****************************************************************************/
-    inline std::string get_peer_address(const Socket& socket) {
-        sockaddr_in addr;
-        #ifdef _WIN32
-            int addrLen = sizeof(addr);
-        #else
-            socklen_t addrLen = sizeof(addr);
-        #endif
-        if (getpeername(socket.get_handle(), reinterpret_cast<sockaddr*>(&addr), &addrLen) != 0)
-            return "[error retrieving address]";
-
-        char host[NI_MAXHOST];
-        // getnameinfo() によりIPアドレスを数値文字列として取得
-        if (getnameinfo(reinterpret_cast<sockaddr*>(&addr), addrLen,
-            host, sizeof(host), nullptr, 0, NI_NUMERICHOST) != 0)
-            return "[unknown]";
-        return std::string(host);
+    inline std::string GetPeerAddress(const Socket& cSocket) {
+        return cSocket.GetPeerAddress();
     }
 
     /******************************************************************************
@@ -330,9 +400,8 @@ namespace sbdp {
      * @return  送信結果 true:正常 false:異常
      * @note
      *****************************************************************************/
-    inline bool send_message(Socket& cSocket, const Message& msg) {
-        std::vector<uint8_t> data = encode_message(msg);
-        return cSocket.send_all(data.data(), data.size());
+    inline bool SendMessage(Socket& cSocket, const Message& msgData) {
+        return cSocket.SendMessage(msgData);
     }
 
     /******************************************************************************
@@ -342,17 +411,7 @@ namespace sbdp {
      * @return  受信メッセージ
      * @note
      *****************************************************************************/
-    inline Message recv_message(Socket& cSocket, uint64_t unTimeoutMs = 0) {
-        uint8_t header[4];
-        if (!cSocket.recv_all(header, 4, unTimeoutMs))
-            throw std::runtime_error("Header reception failed");
-        uint32_t net_payload_len;
-        std::memcpy(&net_payload_len, header, 4);
-        uint32_t payload_len = ntohl(net_payload_len);
-        std::vector<uint8_t> buffer(4 + payload_len);
-        std::memcpy(buffer.data(), header, 4);
-        if (!cSocket.recv_all(buffer.data() + 4, payload_len , unTimeoutMs))
-            throw std::runtime_error("Payload reception failed");
-        return decode_message(buffer);
+    inline Message RecvMessage(Socket& cSocket, uint64_t unTimeoutMs = 0) {
+        return cSocket.RecvMessage(unTimeoutMs);
     }
 } // namespace sbdp

@@ -11,185 +11,227 @@
 #include "SBDPTypedef.h"
 #include "SBDPEndian.h"
 
+#include <cstddef>
 #include <vector>
 #include <cstring>
 
 namespace sbdp {
+    constexpr std::size_t k_unHeaderSize = sizeof(uint32_t);
+    constexpr std::size_t k_unKeyLengthSize = sizeof(uint16_t);
+    constexpr std::size_t k_unInt64ValueSize = sizeof(int64_t);
+    constexpr std::size_t k_unUInt64ValueSize = sizeof(uint64_t);
+    constexpr std::size_t k_unFloat64ValueSize = sizeof(float64_t);
+    constexpr std::size_t k_unStringLengthSize = sizeof(uint32_t);
+    constexpr std::size_t k_unBinaryLengthSize = sizeof(uint32_t);
     /******************************************************************************
      * @brief   バッファへデータを追加するユーティリティ
-     * @arg     buf   (in) バッファ
-     * @arg     data  (in) 追加するデータ
+     * @arg     vecBuffer   (in) バッファ
+     * @arg     tData       (in) 追加するデータ
      * @return  なし
      * @note
      *****************************************************************************/
-    template<typename T>
-    inline void append_bytes(std::vector<uint8_t>& buf, const T& data) {
-        const uint8_t* p = reinterpret_cast<const uint8_t*>(&data);
-        buf.insert(buf.end(), p, p + sizeof(T));
+    template<typename T_>
+    inline void AppendBytes(std::vector<uint8_t>& vecBuffer, const T_& tData) {
+        const uint8_t* pData = reinterpret_cast<const uint8_t*>(&tData);
+        vecBuffer.insert(vecBuffer.end(), pData, pData + sizeof(T_));
     }
 
     /******************************************************************************
-     * @brief   ベクターの結合
-     * @arg     buf   (in) 結合先のベクター
-     * @arg     data  (in) 結合するデータ
+     * @brief   ベクターの連結
+     * @arg     vecBuffer   (in) 連結先ベクター
+     * @arg     vecData     (in) 連結するデータ
      * @return  なし
      * @note
      *****************************************************************************/
-    inline void append_vector(std::vector<uint8_t>& buf, const std::vector<uint8_t>& data) {
-        buf.insert(buf.end(), data.begin(), data.end());
+    inline void AppendVector(std::vector<uint8_t>& vecBuffer,
+                             const std::vector<uint8_t>& vecData) {
+        vecBuffer.insert(vecBuffer.end(), vecData.begin(), vecData.end());
     }
 
     /******************************************************************************
      * @brief   SBDP プロトコルに基づくメッセージのエンコード
-     * @arg     msg   (in) エンコードするSBDPメッセージ
+     * @arg     msgData   (in) エンコードするSBDPメッセージ
      * @return  エンコード結果
      * @note
      *****************************************************************************/
-    inline std::vector<uint8_t> encode_message(const Message& msg) {
-        std::vector<uint8_t> payload;
-        for (const auto& [key, value] : msg) {
-            // キー: キー長 (2バイト, ネットワークオーダー) + キー文字列 (UTF-8)
-            uint16_t key_len = static_cast<uint16_t>(key.size());
-            uint16_t net_key_len = htons(key_len);
-            append_bytes(payload, net_key_len);
-            payload.insert(payload.end(), key.begin(), key.end());
-            // 型コード (1バイト) と値
-            if (std::holds_alternative<int64_t>(value)) {
-                payload.push_back(TYPE_INT64);
-                int64_t v = std::get<int64_t>(value);
-                int64_t net_v = static_cast<int64_t>(htonll(static_cast<uint64_t>(v)));
-                append_bytes(payload, net_v);
+    inline std::vector<uint8_t> EncodeMessage(const Message& msgData) {
+        std::vector<uint8_t> vecPayload;
+        for (const auto& [strKey, svValue] : msgData) {
+            uint16_t unKeyLen = static_cast<uint16_t>(strKey.size());
+            uint16_t unNetKeyLen = htons(unKeyLen);
+            AppendBytes(vecPayload, unNetKeyLen);
+            vecPayload.insert(vecPayload.end(), strKey.begin(), strKey.end());
+
+            if (std::holds_alternative<int64_t>(svValue)) {
+                vecPayload.push_back(TYPE_INT64);
+                int64_t snValue = std::get<int64_t>(svValue);
+                int64_t snNetValue =
+                    static_cast<int64_t>(htonll(static_cast<uint64_t>(snValue)));
+                AppendBytes(vecPayload, snNetValue);
             }
-            else if (std::holds_alternative<uint64_t>(value)) {
-                payload.push_back(TYPE_UINT64);
-                uint64_t v = std::get<uint64_t>(value);
-                uint64_t net_v = htonll(v);
-                append_bytes(payload, net_v);
+            else if (std::holds_alternative<uint64_t>(svValue)) {
+                vecPayload.push_back(TYPE_UINT64);
+                uint64_t unValue = std::get<uint64_t>(svValue);
+                uint64_t unNetValue = htonll(unValue);
+                AppendBytes(vecPayload, unNetValue);
             }
-            else if (std::holds_alternative<float64_t>(value)) {
-                payload.push_back(TYPE_FLOAT64);
-                float64_t v = std::get<float64_t>(value);
-                uint64_t  net_v;
-                std::memcpy(&net_v, &v, sizeof(v));
-                net_v = htonll(net_v);
-                append_bytes(payload, net_v);
+            else if (std::holds_alternative<float64_t>(svValue)) {
+                vecPayload.push_back(TYPE_FLOAT64);
+                float64_t dbValue = std::get<float64_t>(svValue);
+                uint64_t unNetValue = 0;
+                std::memcpy(&unNetValue, &dbValue, sizeof(dbValue));
+                unNetValue = htonll(unNetValue);
+                AppendBytes(vecPayload, unNetValue);
             }
-            else if (std::holds_alternative<std::string>(value)) {
-                payload.push_back(TYPE_STRING);
-                const std::string& s = std::get<std::string>(value);
-                uint32_t str_len = static_cast<uint32_t>(s.size());
-                uint32_t net_str_len = htonl(str_len);
-                append_bytes(payload, net_str_len);
-                payload.insert(payload.end(), s.begin(), s.end());
+            else if (std::holds_alternative<std::string>(svValue)) {
+                vecPayload.push_back(TYPE_STRING);
+                const std::string& strValue = std::get<std::string>(svValue);
+                uint32_t unStrLen = static_cast<uint32_t>(strValue.size());
+                uint32_t unNetStrLen = htonl(unStrLen);
+                AppendBytes(vecPayload, unNetStrLen);
+                vecPayload.insert(vecPayload.end(), strValue.begin(), strValue.end());
             }
-            else if (std::holds_alternative<std::vector<uint8_t>>(value)) {
-                payload.push_back(TYPE_BINARY);
-                const std::vector<uint8_t>& bin = std::get<std::vector<uint8_t>>(value);
-                uint32_t bin_len = static_cast<uint32_t>(bin.size());
-                uint32_t net_bin_len = htonl(bin_len);
-                append_bytes(payload, net_bin_len);
-                payload.insert(payload.end(), bin.begin(), bin.end());
+            else if (std::holds_alternative<std::vector<uint8_t>>(svValue)) {
+                vecPayload.push_back(TYPE_BINARY);
+                const std::vector<uint8_t>& vecBinary =
+                    std::get<std::vector<uint8_t>>(svValue);
+                uint32_t unBinLen = static_cast<uint32_t>(vecBinary.size());
+                uint32_t unNetBinLen = htonl(unBinLen);
+                AppendBytes(vecPayload, unNetBinLen);
+                vecPayload.insert(vecPayload.end(), vecBinary.begin(), vecBinary.end());
             }
         }
-        uint32_t payload_len = static_cast<uint32_t>(payload.size());
-        uint32_t net_payload_len = htonl(payload_len);
-        std::vector<uint8_t> message;
-        append_bytes(message, net_payload_len);
-        append_vector(message, payload);
-        return message;
+
+        uint32_t unPayloadLen = static_cast<uint32_t>(vecPayload.size());
+        uint32_t unNetPayloadLen = htonl(unPayloadLen);
+        std::vector<uint8_t> vecMessage;
+        AppendBytes(vecMessage, unNetPayloadLen);
+        AppendVector(vecMessage, vecPayload);
+        return vecMessage;
     }
 
     /******************************************************************************
      * @brief   SBDP プロトコルに基づくメッセージのデコード
-     * @arg     msg   (in) エンコードされたSBDPメッセージ
+     * @arg     vecMessage   (in) エンコードされたSBDPメッセージ
      * @return  デコード結果
      * @note
      *****************************************************************************/
-    inline Message decode_message(const std::vector<uint8_t>& message) {
-        Message msg;
-        size_t offset = 0;
-        if (message.size() < 4)
+    inline Message DecodeMessage(const std::vector<uint8_t>& vecMessage) {
+        Message msgDecoded;
+        size_t unOffset = 0;
+
+        if (vecMessage.size() < k_unHeaderSize) {
             throw std::runtime_error("Message too short");
-        uint32_t net_payload_len;
-        std::memcpy(&net_payload_len, message.data(), sizeof(net_payload_len));
-        offset += sizeof(net_payload_len);
-        uint32_t payload_len = ntohl(net_payload_len);
-        if (message.size() < 4 + payload_len)
+        }
+
+        uint32_t unNetPayloadLen = 0;
+        std::memcpy(&unNetPayloadLen, vecMessage.data(), k_unHeaderSize);
+        unOffset += k_unHeaderSize;
+
+        uint32_t unPayloadLen = ntohl(unNetPayloadLen);
+        if (vecMessage.size() < k_unHeaderSize + unPayloadLen) {
             throw std::runtime_error("Incomplete message");
-        while (offset < 4 + payload_len) {
-            uint16_t net_key_len;
-            if (offset + sizeof(net_key_len) > message.size())
+        }
+        if (vecMessage.size() > k_unHeaderSize + unPayloadLen) {
+            throw std::runtime_error("Message too big");
+        }
+
+        while (unOffset < k_unHeaderSize + unPayloadLen) {
+            uint16_t unNetKeyLen = 0;
+            if (unOffset + k_unKeyLengthSize > vecMessage.size()) {
                 throw std::runtime_error("Key length read error");
-            std::memcpy(&net_key_len, message.data() + offset, sizeof(net_key_len));
-            offset += sizeof(net_key_len);
-            uint16_t key_len = ntohs(net_key_len);
-            if (offset + key_len > message.size())
+            }
+            std::memcpy(&unNetKeyLen, vecMessage.data() + unOffset, k_unKeyLengthSize);
+            unOffset += k_unKeyLengthSize;
+
+            uint16_t unKeyLen = ntohs(unNetKeyLen);
+            if (unOffset + unKeyLen > vecMessage.size()) {
                 throw std::runtime_error("Key string region insufficient");
-            std::string key(reinterpret_cast<const char*>(message.data() + offset), key_len);
-            offset += key_len;
-            if (offset >= message.size())
+            }
+
+            std::string strKey(
+                reinterpret_cast<const char*>(vecMessage.data() + unOffset),
+                unKeyLen);
+            unOffset += unKeyLen;
+
+            if (unOffset >= vecMessage.size()) {
                 throw std::runtime_error("Type code read error");
-            uint8_t type_code = message[offset++];
-            if (type_code == TYPE_INT64) {
-                if (offset + 8 > message.size())
+            }
+
+            uint8_t unTypeCode = vecMessage[unOffset++];
+            if (unTypeCode == TYPE_INT64) {
+                if (unOffset + k_unInt64ValueSize > vecMessage.size()) {
                     throw std::runtime_error("int64 read error");
-                int64_t net_v;
-                std::memcpy(&net_v, message.data() + offset, 8);
-                offset += 8;
-                int64_t v = static_cast<int64_t>(ntohll(static_cast<uint64_t>(net_v)));
-                msg[key] = v;
+                }
+                int64_t snNetValue = 0;
+                std::memcpy(&snNetValue, vecMessage.data() + unOffset, k_unInt64ValueSize);
+                unOffset += k_unInt64ValueSize;
+                int64_t snValue =
+                    static_cast<int64_t>(ntohll(static_cast<uint64_t>(snNetValue)));
+                msgDecoded[strKey] = snValue;
             }
-            else if (type_code == TYPE_UINT64) {
-                if (offset + 8 > message.size())
+            else if (unTypeCode == TYPE_UINT64) {
+                if (unOffset + k_unUInt64ValueSize > vecMessage.size()) {
                     throw std::runtime_error("uint64 read error");
-                uint64_t net_v;
-                std::memcpy(&net_v, message.data() + offset, 8);
-                offset += 8;
-                uint64_t v = ntohll(net_v);
-                msg[key] = v;
+                }
+                uint64_t unNetValue = 0;
+                std::memcpy(&unNetValue, vecMessage.data() + unOffset, k_unUInt64ValueSize);
+                unOffset += k_unUInt64ValueSize;
+                uint64_t unValue = ntohll(unNetValue);
+                msgDecoded[strKey] = unValue;
             }
-            else if (type_code == TYPE_FLOAT64) {
-                if (offset + 8 > message.size())
+            else if (unTypeCode == TYPE_FLOAT64) {
+                if (unOffset + k_unFloat64ValueSize > vecMessage.size()) {
                     throw std::runtime_error("float64_t read error");
-                uint64_t net_v;
-                std::memcpy(&net_v, message.data() + offset, 8);
-                offset += 8;
-                net_v = ntohll(net_v);
-                float64_t v;
-                std::memcpy(&v, &net_v, sizeof(v));
-                msg[key] = v;
+                }
+                uint64_t unNetValue = 0;
+                std::memcpy(&unNetValue, vecMessage.data() + unOffset, k_unFloat64ValueSize);
+                unOffset += k_unFloat64ValueSize;
+                unNetValue = ntohll(unNetValue);
+                float64_t dbValue = 0;
+                std::memcpy(&dbValue, &unNetValue, sizeof(dbValue));
+                msgDecoded[strKey] = dbValue;
             }
-            else if (type_code == TYPE_STRING) {
-                if (offset + 4 > message.size())
+            else if (unTypeCode == TYPE_STRING) {
+                if (unOffset + k_unStringLengthSize > vecMessage.size()) {
                     throw std::runtime_error("String length read error");
-                uint32_t net_str_len;
-                std::memcpy(&net_str_len, message.data() + offset, 4);
-                offset += 4;
-                uint32_t str_len = ntohl(net_str_len);
-                if (offset + str_len > message.size())
+                }
+                uint32_t unNetStrLen = 0;
+                std::memcpy(&unNetStrLen, vecMessage.data() + unOffset, k_unStringLengthSize);
+                unOffset += k_unStringLengthSize;
+                uint32_t unStrLen = ntohl(unNetStrLen);
+                if (unOffset + unStrLen > vecMessage.size()) {
                     throw std::runtime_error("String data insufficient");
-                std::string s(reinterpret_cast<const char*>(message.data() + offset), str_len);
-                offset += str_len;
-                msg[key] = s;
+                }
+                std::string strValue(
+                    reinterpret_cast<const char*>(vecMessage.data() + unOffset),
+                    unStrLen);
+                unOffset += unStrLen;
+                msgDecoded[strKey] = strValue;
             }
-            else if (type_code == TYPE_BINARY) {
-                if (offset + 4 > message.size())
+            else if (unTypeCode == TYPE_BINARY) {
+                if (unOffset + k_unBinaryLengthSize > vecMessage.size()) {
                     throw std::runtime_error("Binary length read error");
-                uint32_t net_bin_len;
-                std::memcpy(&net_bin_len, message.data() + offset, 4);
-                offset += 4;
-                uint32_t bin_len = ntohl(net_bin_len);
-                if (offset + bin_len > message.size())
+                }
+                uint32_t unNetBinLen = 0;
+                std::memcpy(&unNetBinLen, vecMessage.data() + unOffset, k_unBinaryLengthSize);
+                unOffset += k_unBinaryLengthSize;
+                uint32_t unBinLen = ntohl(unNetBinLen);
+                if (unOffset + unBinLen > vecMessage.size()) {
                     throw std::runtime_error("Binary data insufficient");
-                std::vector<uint8_t> bin(message.begin() + offset, message.begin() + offset + bin_len);
-                offset += bin_len;
-                msg[key] = bin;
+                }
+                std::vector<uint8_t> vecBinary(
+                    vecMessage.begin() + unOffset,
+                    vecMessage.begin() + unOffset + unBinLen);
+                unOffset += unBinLen;
+                msgDecoded[strKey] = vecBinary;
             }
             else {
                 throw std::runtime_error("Unknown type code");
             }
         }
-        return msg;
+
+        return msgDecoded;
     }
 
 } // namespace sbdp
