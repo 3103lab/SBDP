@@ -15,6 +15,7 @@
 #include <string>
 #include <system_error>
 #include <cerrno>
+#include <atomic>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
